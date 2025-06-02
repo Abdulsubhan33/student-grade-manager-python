@@ -1,139 +1,185 @@
 import os
 import csv
+from flask import Flask, request, render_template_string, redirect, url_for, session
+
+app = Flask(__name__)
+app.secret_key = 'secretkey'  # Needed for session management
+
 filename = "grades.txt"
-# Only write header if file is empty or doesn't exist
+USERNAME = "admin"
+PASSWORD = "1234"
+
+# Create the grades file with header
 if not os.path.exists(filename) or os.stat(filename).st_size == 0:
     with open(filename, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(["Name", "Roll Number", "Grade"])
-print("Welcome to the Student Grades Management System")
-def addstudent():
-    name = input("Enter student name: ").strip()
-    rollno = input("Enter roll number: ")  
-    grade = input("Enter grade: ")
-    if not name or not rollno or not grade:
-        print("All fields are required. Please try again.")
-        return
-    try:
-        with open(filename, 'r') as d:
-            data = d.readlines()
-        for line in data:
-            if not line.strip():
-                continue
-            existing_name, existing_rollno, existing_grade = line.strip().split(",")
-            if existing_rollno.strip() == rollno:
-                print(f"Roll number  {existing_rollno} , already exists. Please enter a different roll number.")
-                return  # Stop further processing
 
-        with open(filename, "a") as f:
-            f.write(f"{name},{rollno},{grade}\n")
-            print("Student added successfully.")
-    except IOError:
-        print("File not found or created ....")
+# ---------- ROUTES ----------
 
-def viewstudent():
-    try:
-        print("\n {:<20} {:<15} {:<10}".format("Name", "Roll Number", "Grade"))
-        print("-" * 50)
-        found = False
-        with open(filename, "r") as z:
-            for line in z:
-                if not line.strip():
-                    continue
-                name, rollno, grade = line.strip().split(",")
-                print("{:<20} {:<15} {:<10}".format(name, rollno, grade))
-                found = True
-        if not found:
-            print("No records found.")
-    except IOError:
-        print("No records found")
+# Login page
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    error = ''
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        if username == USERNAME and password == PASSWORD:
+            session['user'] = username
+            return redirect(url_for('index'))
+        else:
+            error = 'Invalid credentials. Try again.'
+    return render_template_string('''
+        <h2>Login</h2>
+        <form method="post">
+            Username: <input name="username"><br>
+            Password: <input name="password" type="password"><br>
+            <input type="submit" value="Login">
+        </form>
+        <p style="color:red;">{{ error }}</p>
+    ''', error=error)
 
-def search():
-    rollnumber = input("Enter roll number to search: ").strip()
-    found = False
+# Logout route
+@app.route('/logout')
+def logout():
+    session.pop('user', None)
+    return redirect(url_for('login'))
+
+# Home page / main menu
+@app.route('/')
+def index():
+    if 'user' not in session:
+        return redirect(url_for('login'))
+    return render_template_string('''
+        <h1>Welcome, {{ session["user"] }}!</h1>
+        <a href="/add">Add Student</a> |
+        <a href="/view">View Students</a> |
+        <a href="/search">Search Student</a> |
+        <a href="/delete">Delete Student</a> |
+        <a href="/logout">Logout</a>
+    ''', session=session)
+
+# Add student
+@app.route('/add', methods=['GET', 'POST'])
+def add_student():
+    if 'user' not in session:
+        return redirect(url_for('login'))
+    message = ''
+    if request.method == 'POST':
+        name = request.form['name'].strip()
+        rollno = request.form['rollno'].strip()
+        grade = request.form['grade'].strip()
+
+        if not name or not rollno or not grade:
+            message = "All fields are required."
+        else:
+            with open(filename, 'r') as f:
+                for line in f:
+                    if rollno in line:
+                        message = f"Roll number {rollno} already exists."
+                        break
+                else:
+                    with open(filename, 'a') as f:
+                        f.write(f"{name},{rollno},{grade}\n")
+                        return redirect(url_for('view_students'))
+
+    return render_template_string('''
+        <h2>Add Student</h2>
+        <form method="post">
+            Name: <input name="name"><br>
+            Roll No: <input name="rollno"><br>
+            Grade: <input name="grade"><br>
+            <input type="submit" value="Add Student">
+        </form>
+        <p style="color:red;">{{ message }}</p>
+        <a href="/">Back to Home</a>
+    ''', message=message)
+
+# View students
+@app.route('/view')
+def view_students():
+    if 'user' not in session:
+        return redirect(url_for('login'))
+    students = []
     try:
-        with open(filename, "r") as f:
-            for line in f:
-                if not line.strip():
-                    continue  
-                name, rollno, grade = line.strip().split(",")
-                if rollno.strip() == str(rollnumber):
-                    print(f" Found: Name: {name}, Roll Number: {rollno}, Grade: {grade}")
-                    found = True
-                    break
-        if found == False:
-            print("Record not found.")
+        with open(filename, 'r') as f:
+            reader = csv.reader(f)
+            next(reader)
+            students = list(reader)
     except FileNotFoundError:
-        print("No records or file found.")
+        pass
+    return render_template_string('''
+        <h2>All Students</h2>
+        <table border="1">
+            <tr><th>Name</th><th>Roll Number</th><th>Grade</th></tr>
+            {% for s in students %}
+                <tr><td>{{ s[0] }}</td><td>{{ s[1] }}</td><td>{{ s[2] }}</td></tr>
+            {% endfor %}
+        </table>
+        <a href="/">Back to Home</a>
+    ''', students=students)
 
-def delete():
-    rollnumber = input("enter roll number to delete: ").strip()
-    found = False
-    try:
-        with open(filename ,'r') as f :
+# Search student
+@app.route('/search', methods=['GET', 'POST'])
+def search_student():
+    if 'user' not in session:
+        return redirect(url_for('login'))
+    result = None
+    if request.method == 'POST':
+        rollno = request.form['rollno'].strip()
+        with open(filename, 'r') as f:
+            reader = csv.reader(f)
+            next(reader)
+            for row in reader:
+                if row[1] == rollno:
+                    result = row
+                    break
+    return render_template_string('''
+        <h2>Search Student</h2>
+        <form method="post">
+            Enter Roll Number: <input name="rollno">
+            <input type="submit" value="Search">
+        </form>
+        {% if result %}
+            <p><strong>Found:</strong> Name: {{ result[0] }}, Roll No: {{ result[1] }}, Grade: {{ result[2] }}</p>
+        {% elif result is not none %}
+            <p style="color:red;">Record not found.</p>
+        {% endif %}
+        <a href="/">Back to Home</a>
+    ''', result=result)
+
+# Delete student
+@app.route('/delete', methods=['GET', 'POST'])
+def delete_student():
+    if 'user' not in session:
+        return redirect(url_for('login'))
+    message = ''
+    if request.method == 'POST':
+        rollno = request.form['rollno'].strip()
+        lines = []
+        found = False
+
+        with open(filename, 'r') as f:
             lines = f.readlines()
+
         with open(filename, 'w') as f:
             for line in lines:
-                if not line.strip():
-                    continue
-                name, rollno, grade = line.strip().split(",")
-                if rollno.strip() == str(rollnumber):
+                if rollno in line:
                     found = True
-                    print(f" Record with roll number {rollnumber} deleted successfully.")
-                    continue  # skip writing this line
+                    continue
                 f.write(line)
 
-        if not found:
-            print("Record not found.")
-    except IOError:
-        print(" File not found or not created.")
-def login():
-    Username = "admin"
-    Pass= "1234"
-    attempt = 3
-    while attempt > 0 :
-        print("\n------ Login ---")
-        username = input("Enter username : ").strip()
-        password = input("Enter password : ").strip()
-        if username == Username and password == Pass:
-             print(f"Login successfully as {username}")
-             return "admin"
-        else:
-            attempt -= 1
-            print(f"Invalid credentials. You have {attempt} attempts left.")
-    print("Too many failed attempts. Exiting the program.")
-    return None
-def mainmenu(role):
-    while True:
-        print("\nMain Menu:")
-        print("1. Add Student" if role == "admin" else "")
-        print("2. View Students")
-        print("3. Search Student")
-        print("4. Delete Student" if role == "admin" else "")
-        print("5. Exit")
+        message = f"Record with Roll Number {rollno} deleted." if found else "Record not found."
+    return render_template_string('''
+        <h2>Delete Student</h2>
+        <form method="post">
+            Enter Roll Number: <input name="rollno">
+            <input type="submit" value="Delete">
+        </form>
+        <p>{{ message }}</p>
+        <a href="/">Back to Home</a>
+    ''', message=message)
 
-        choice = input("Enter your choice: ").strip()
-
-        if choice == "1" and role == "admin":
-            addstudent()
-        elif choice == "2":
-            viewstudent()
-        elif choice == "3":
-            search()
-        elif choice == "4" and role == "admin":
-            delete()
-        elif choice == "5":
-            print("Exiting the program. Goodbye!")
-            break
-        else:
-            print("Invalid choice or access denied.")
-
+# ---------- Run App ----------
 if __name__ == "__main__":
-    role = login()
-    if role:
-        mainmenu(role)
-
-
-
-
-
+    app.run(debug=True)
