@@ -1,185 +1,253 @@
-import os
-import csv
-from flask import Flask, request, render_template_string, redirect, url_for, session
+from flask import Flask, render_template_string, request, redirect, session
+import sqlite3
 
 app = Flask(__name__)
-app.secret_key = 'secretkey'  # Needed for session management
+app.secret_key = 'your_secret_key'
 
-filename = "grades.txt"
-USERNAME = "admin"
-PASSWORD = "1234"
+def init_db():
+    conn = sqlite3.connect('students.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS students
+                 (name TEXT, rollno TEXT PRIMARY KEY, grade TEXT)''')
+    conn.commit()
+    conn.close()
 
-# Create the grades file with header
-if not os.path.exists(filename) or os.stat(filename).st_size == 0:
-    with open(filename, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(["Name", "Roll Number", "Grade"])
-
-# ---------- ROUTES ----------
-
-# Login page
-@app.route('/login', methods=['GET', 'POST'])
+@app.route('/', methods=['GET', 'POST'])
 def login():
-    error = ''
+    error = None
     if request.method == 'POST':
-        username = request.form['username']
-        password = request.form['password']
-        if username == USERNAME and password == PASSWORD:
-            session['user'] = username
-            return redirect(url_for('index'))
+        if request.form['username'] == 'admin' and request.form['password'] == 'admin':
+            session['user'] = request.form['username']
+            return redirect('/home')
         else:
-            error = 'Invalid credentials. Try again.'
+            error = 'Invalid Credentials'
     return render_template_string('''
-        <h2>Login</h2>
-        <form method="post">
-            Username: <input name="username"><br>
-            Password: <input name="password" type="password"><br>
-            <input type="submit" value="Login">
-        </form>
-        <p style="color:red;">{{ error }}</p>
-    ''', error=error)
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Login</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+<div class="container mt-5">
+    <div class="card mx-auto" style="max-width: 400px;">
+        <div class="card-body">
+            <h3 class="card-title text-center mb-4">Login</h3>
+            <form method="post">
+                <div class="mb-3">
+                    <label>Username</label>
+                    <input name="username" class="form-control" required>
+                </div>
+                <div class="mb-3">
+                    <label>Password</label>
+                    <input name="password" type="password" class="form-control" required>
+                </div>
+                <button type="submit" class="btn btn-primary w-100">Login</button>
+            </form>
+            {% if error %}
+                <div class="alert alert-danger mt-3">{{ error }}</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+</body>
+</html>
+''', error=error)
 
-# Logout route
-@app.route('/logout')
-def logout():
-    session.pop('user', None)
-    return redirect(url_for('login'))
-
-# Home page / main menu
-@app.route('/')
+@app.route('/home')
 def index():
-    if 'user' not in session:
-        return redirect(url_for('login'))
-    return render_template_string('''
-        <h1>Welcome, {{ session["user"] }}!</h1>
-        <a href="/add">Add Student</a> |
-        <a href="/view">View Students</a> |
-        <a href="/search">Search Student</a> |
-        <a href="/delete">Delete Student</a> |
-        <a href="/logout">Logout</a>
-    ''', session=session)
+    if 'user' in session:
+        return render_template_string('''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+<div class="container mt-5">
+    <h1 class="mb-4">Welcome, {{ session["user"] }}!</h1>
+    <div class="d-flex flex-wrap gap-2">
+        <a href="/add" class="btn btn-success">Add Student</a>
+        <a href="/view" class="btn btn-info">View Students</a>
+        <a href="/search" class="btn btn-warning">Search Student</a>
+        <a href="/delete" class="btn btn-danger">Delete Student</a>
+        <a href="/logout" class="btn btn-secondary">Logout</a>
+    </div>
+</div>
+</body>
+</html>
+''', session=session)
+    return redirect('/')
 
-# Add student
 @app.route('/add', methods=['GET', 'POST'])
 def add_student():
-    if 'user' not in session:
-        return redirect(url_for('login'))
     message = ''
     if request.method == 'POST':
-        name = request.form['name'].strip()
-        rollno = request.form['rollno'].strip()
-        grade = request.form['grade'].strip()
-
-        if not name or not rollno or not grade:
-            message = "All fields are required."
-        else:
-            with open(filename, 'r') as f:
-                for line in f:
-                    if rollno in line:
-                        message = f"Roll number {rollno} already exists."
-                        break
-                else:
-                    with open(filename, 'a') as f:
-                        f.write(f"{name},{rollno},{grade}\n")
-                        return redirect(url_for('view_students'))
-
+        name = request.form['name']
+        rollno = request.form['rollno']
+        grade = request.form['grade']
+        try:
+            conn = sqlite3.connect('students.db')
+            c = conn.cursor()
+            c.execute("INSERT INTO students VALUES (?, ?, ?)", (name, rollno, grade))
+            conn.commit()
+            conn.close()
+            return redirect('/view')
+        except sqlite3.IntegrityError:
+            message = 'Student with this roll number already exists.'
     return render_template_string('''
-        <h2>Add Student</h2>
-        <form method="post">
-            Name: <input name="name"><br>
-            Roll No: <input name="rollno"><br>
-            Grade: <input name="grade"><br>
-            <input type="submit" value="Add Student">
-        </form>
-        <p style="color:red;">{{ message }}</p>
-        <a href="/">Back to Home</a>
-    ''', message=message)
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Add Student</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+<div class="container mt-5">
+    <div class="card mx-auto" style="max-width: 500px;">
+        <div class="card-body">
+            <h3 class="card-title text-center mb-4">Add Student</h3>
+            <form method="post">
+                <div class="mb-3">
+                    <label>Name</label>
+                    <input name="name" class="form-control" required>
+                </div>
+                <div class="mb-3">
+                    <label>Roll No</label>
+                    <input name="rollno" class="form-control" required>
+                </div>
+                <div class="mb-3">
+                    <label>Grade</label>
+                    <input name="grade" class="form-control" required>
+                </div>
+                <button type="submit" class="btn btn-success w-100">Add Student</button>
+            </form>
+            {% if message %}
+                <div class="alert alert-danger mt-3">{{ message }}</div>
+            {% endif %}
+            <a href="/home" class="btn btn-link mt-3">Back to Home</a>
+        </div>
+    </div>
+</div>
+</body>
+</html>
+''', message=message)
 
-# View students
 @app.route('/view')
 def view_students():
-    if 'user' not in session:
-        return redirect(url_for('login'))
-    students = []
-    try:
-        with open(filename, 'r') as f:
-            reader = csv.reader(f)
-            next(reader)
-            students = list(reader)
-    except FileNotFoundError:
-        pass
+    conn = sqlite3.connect('students.db')
+    c = conn.cursor()
+    c.execute("SELECT * FROM students")
+    students = c.fetchall()
+    conn.close()
     return render_template_string('''
-        <h2>All Students</h2>
-        <table border="1">
+<!DOCTYPE html>
+<html>
+<head>
+    <title>View Students</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+<div class="container mt-5">
+    <h2 class="mb-4">All Students</h2>
+    <table class="table table-striped table-bordered">
+        <thead class="table-dark">
             <tr><th>Name</th><th>Roll Number</th><th>Grade</th></tr>
+        </thead>
+        <tbody>
             {% for s in students %}
                 <tr><td>{{ s[0] }}</td><td>{{ s[1] }}</td><td>{{ s[2] }}</td></tr>
             {% endfor %}
-        </table>
-        <a href="/">Back to Home</a>
-    ''', students=students)
+        </tbody>
+    </table>
+    <a href="/home" class="btn btn-link">Back to Home</a>
+</div>
+</body>
+</html>
+''', students=students)
 
-# Search student
 @app.route('/search', methods=['GET', 'POST'])
 def search_student():
-    if 'user' not in session:
-        return redirect(url_for('login'))
     result = None
     if request.method == 'POST':
-        rollno = request.form['rollno'].strip()
-        with open(filename, 'r') as f:
-            reader = csv.reader(f)
-            next(reader)
-            for row in reader:
-                if row[1] == rollno:
-                    result = row
-                    break
+        rollno = request.form['rollno']
+        conn = sqlite3.connect('students.db')
+        c = conn.cursor()
+        c.execute("SELECT * FROM students WHERE rollno = ?", (rollno,))
+        result = c.fetchone()
+        conn.close()
     return render_template_string('''
-        <h2>Search Student</h2>
-        <form method="post">
-            Enter Roll Number: <input name="rollno">
-            <input type="submit" value="Search">
-        </form>
-        {% if result %}
-            <p><strong>Found:</strong> Name: {{ result[0] }}, Roll No: {{ result[1] }}, Grade: {{ result[2] }}</p>
-        {% elif result is not none %}
-            <p style="color:red;">Record not found.</p>
-        {% endif %}
-        <a href="/">Back to Home</a>
-    ''', result=result)
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Search Student</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+<div class="container mt-5">
+    <h2 class="mb-4">Search Student</h2>
+    <form method="post" class="mb-3">
+        <div class="input-group">
+            <input name="rollno" class="form-control" placeholder="Enter Roll Number" required>
+            <button class="btn btn-warning" type="submit">Search</button>
+        </div>
+    </form>
+    {% if result %}
+        <div class="alert alert-success">Found: <strong>{{ result[0] }}</strong>, Roll No: {{ result[1] }}, Grade: {{ result[2] }}</div>
+    {% elif result is not none %}
+        <div class="alert alert-danger">Record not found.</div>
+    {% endif %}
+    <a href="/home" class="btn btn-link">Back to Home</a>
+</div>
+</body>
+</html>
+''', result=result)
 
-# Delete student
 @app.route('/delete', methods=['GET', 'POST'])
 def delete_student():
-    if 'user' not in session:
-        return redirect(url_for('login'))
     message = ''
     if request.method == 'POST':
-        rollno = request.form['rollno'].strip()
-        lines = []
-        found = False
-
-        with open(filename, 'r') as f:
-            lines = f.readlines()
-
-        with open(filename, 'w') as f:
-            for line in lines:
-                if rollno in line:
-                    found = True
-                    continue
-                f.write(line)
-
-        message = f"Record with Roll Number {rollno} deleted." if found else "Record not found."
+        rollno = request.form['rollno']
+        conn = sqlite3.connect('students.db')
+        c = conn.cursor()
+        c.execute("DELETE FROM students WHERE rollno = ?", (rollno,))
+        conn.commit()
+        if c.rowcount:
+            message = 'Student deleted successfully.'
+        else:
+            message = 'Student not found.'
+        conn.close()
     return render_template_string('''
-        <h2>Delete Student</h2>
-        <form method="post">
-            Enter Roll Number: <input name="rollno">
-            <input type="submit" value="Delete">
-        </form>
-        <p>{{ message }}</p>
-        <a href="/">Back to Home</a>
-    ''', message=message)
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Delete Student</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+<div class="container mt-5">
+    <h2 class="mb-4">Delete Student</h2>
+    <form method="post" class="mb-3">
+        <div class="input-group">
+            <input name="rollno" class="form-control" placeholder="Enter Roll Number" required>
+            <button class="btn btn-danger" type="submit">Delete</button>
+        </div>
+    </form>
+    {% if message %}
+        <div class="alert alert-info">{{ message }}</div>
+    {% endif %}
+    <a href="/home" class="btn btn-link">Back to Home</a>
+</div>
+</body>
+</html>
+''', message=message)
 
-# ---------- Run App ----------
-if __name__ == "__main__":
+@app.route('/logout')
+def logout():
+    session.pop('user', None)
+    return redirect('/')
+
+if __name__ == '__main__':
+    init_db()
     app.run(debug=True)
