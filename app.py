@@ -1,7 +1,10 @@
 from flask import Flask, render_template, request, redirect, session
 import sqlite3
+import os
+
 app = Flask(__name__)
-@app.route("/")
+app.secret_key = 'your_secret_key'  # Required for sessions
+
 def init_db():
     conn = sqlite3.connect('students.db')
     c = conn.cursor()
