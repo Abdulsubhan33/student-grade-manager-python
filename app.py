@@ -1,9 +1,7 @@
 from flask import Flask, render_template, request, redirect, session
 import sqlite3
-
 app = Flask(__name__)
-app.secret_key = 'your_secret_key'
-
+app.run(host='0.0.0.0', port=81)
 def init_db():
     conn = sqlite3.connect('students.db')
     c = conn.cursor()
